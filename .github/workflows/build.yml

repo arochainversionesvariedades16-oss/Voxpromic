@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Descargar codigo
@@ -24,22 +24,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar dependencias del sistema y Buildozer
+      - name: Instalar dependencias
         run: |
           sudo apt update
           sudo apt install -y git zip unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libffi-dev libssl-dev cmake libltdl-dev
           pip install --upgrade "cython<3.0" "buildozer==1.5.0"
 
-      - name: Aceptar licencias de Android SDK
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0" "platforms;android-33"
-
       - name: Compilar APK
         run: |
-          yes | buildozer -v android debug
+          buildozer -v android debug
 
-      - name: Guardar APK generada
+      - name: Subir instalador APK
         uses: actions/upload-artifact@v4
         with:
           name: VoxPro-Instalador-APK
