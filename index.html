@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VoxPro DJ Mic</title>
+    <style>
+        body {
+            background-color: #0D0E15;
+            color: #C0CAF5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        .header { font-size: 12px; color: #565F89; letter-spacing: 2px; font-weight: bold; }
+        .title { font-size: 22px; font-weight: bold; color: #7AA2F7; margin: 5px 0; }
+        .mic-icon {
+            font-size: 64px;
+            margin: 10px 0;
+            padding: 20px;
+            border-radius: 50%;
+            background: #161824;
+            border: 3px solid #363B54;
+            transition: 0.3s;
+        }
+        .mic-active {
+            border-color: #9ECE6A;
+            box-shadow: 0 0 25px rgba(158, 206, 106, 0.4);
+        }
+        .status { font-size: 13px; font-weight: bold; color: #F7768E; margin-bottom: 15px; }
+        .status-on { color: #9ECE6A; }
+        
+        .btn-power {
+            background: #1A1B26;
+            color: #9ECE6A;
+            border: 2px solid #9ECE6A;
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            width: 85%;
+            max-width: 320px;
+        }
+        .btn-power.active {
+            background: #F7768E;
+            color: #0D0E15;
+            border-color: #F7768E;
+        }
+
+        .mixer-rack {
+            background: #161824;
+            border: 2px solid #24283B;
+            border-radius: 14px;
+            padding: 20px;
+            width: 90%;
+            max-width: 350px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .control-group { display: flex; flex-direction: column; gap: 6px; }
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: #090A0F;
+            height: 10px;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #7AA2F7;
+            cursor: pointer;
+        }
+        .vu-meter {
+            width: 100%;
+            height: 12px;
+            background: #090A0F;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .vu-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #9ECE6A, #E0AF68, #F7768E);
+            transition: width 0.05s;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">PRO AUDIO CONSOLE</div>
+    <div class="title">VOX-PRO WIRELESS</div>
+
+    <div id="micIcon" class="mic-icon">🎙️</div>
+    <div id="statusText" class="status">● OFFLINE</div>
+
+    <button id="powerBtn" class="btn-power" onclick="toggleMic()">ENCENDER MICRÓFONO</button>
+
+    <div class="mixer-rack">
+        <div class="control-group">
+            <div class="control-label">
+                <span style="color:#9ECE6A;">NIVEL DE SEÑAL (VU)</span>
+            </div>
+            <div class="vu-meter"><div id="vuFill" class="vu-fill"></div></div>
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span style="color:#7AA2F7;">VOLUMEN GENERAL</span>
+                <span id="volVal">100%</span>
+            </div>
+            <input type="range" id="volSlider" min="0" max="2" step="0.05" value="1" oninput="updateAudio()">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span style="color:#BB9AF7;">BAJO (GRAVES)</span>
+                <span id="bassVal">0 dB</span>
+            </div>
+            <input type="range" id="bassSlider" min="-15" max="15" step="1" value="0" oninput="updateAudio()">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span style="color:#7DCFFF;">BRILLO (AGUDOS)</span>
+                <span id="trebleVal">0 dB</span>
+            </div>
+            <input type="range" id="trebleSlider" min="-15" max="15" step="1" value="0" oninput="updateAudio()">
+        </div>
+    </div>
+
+    <script>
+        let audioCtx, micStream, gainNode, bassNode, trebleNode, analyser;
+        let isRunning = false;
+        let animId;
+
+        async function toggleMic() {
+            const btn = document.getElementById('powerBtn');
+            const icon = document.getElementById('micIcon');
+            const status = document.getElementById('statusText');
+
+            if (!isRunning) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                            latency: 0
+                        }
+                    });
+
+                    const source = audioCtx.createMediaStreamSource(micStream);
+
+                    // Filtro de Graves (Bajo - 250 Hz)
+                    bassNode = audioCtx.createBiquadFilter();
+                    bassNode.type = "lowshelf";
+                    bassNode.frequency.value = 250;
+
+                    // Filtro de Agudos (Brillo - 3500 Hz)
+                    trebleNode = audioCtx.createBiquadFilter();
+                    trebleNode.type = "highshelf";
+                    trebleNode.frequency.value = 3500;
+
+                    // Control de Volumen
+                    gainNode = audioCtx.createGain();
+
+                    // Analizador VU Meter
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+
+                    // Conectar cadena de audio hacia la salida (Bluetooth / Amplificador)
+                    source.connect(bassNode);
+                    bassNode.connect(trebleNode);
+                    trebleNode.connect(gainNode);
+                    gainNode.connect(analyser);
+                    gainNode.connect(audioCtx.destination);
+
+                    updateAudio();
+                    isRunning = true;
+
+                    btn.textContent = "APAGAR MICRÓFONO";
+                    btn.classList.add('active');
+                    icon.classList.add('mic-active');
+                    status.textContent = "● TRANSMITIENDO EN VIVO";
+                    status.classList.add('status-on');
+
+                    drawVuMeter();
+                } catch (err) {
+                    alert("Permiso de micrófono requerido: " + err.message);
+                }
+            } else {
+                if (micStream) micStream.getTracks().forEach(track => track.stop());
+                if (audioCtx) audioCtx.close();
+                cancelAnimationFrame(animId);
+                document.getElementById('vuFill').style.width = '0%';
+
+                isRunning = false;
+                btn.textContent = "ENCENDER MICRÓFONO";
+                btn.classList.remove('active');
+                icon.classList.remove('mic-active');
+                status.textContent = "● OFFLINE";
+                status.classList.remove('status-on');
+            }
+        }
+
+        function updateAudio() {
+            const vol = parseFloat(document.getElementById('volSlider').value);
+            const bass = parseFloat(document.getElementById('bassSlider').value);
+            const treble = parseFloat(document.getElementById('trebleSlider').value);
+
+            document.getElementById('volVal').textContent = Math.round(vol * 100) + "%";
+            document.getElementById('bassVal').textContent = (bass > 0 ? "+" : "") + bass + " dB";
+            document.getElementById('trebleVal').textContent = (treble > 0 ? "+" : "") + treble + " dB";
+
+            if (isRunning) {
+                gainNode.gain.value = vol;
+                bassNode.gain.value = bass;
+                trebleNode.gain.value = treble;
+            }
+        }
+
+        function drawVuMeter() {
+            if (!isRunning) return;
+            const data = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) sum += data[i];
+            let avg = sum / data.length;
+            let pct = Math.min(100, Math.round((avg / 128) * 100));
+            document.getElementById('vuFill').style.width = pct + '%';
+            animId = requestAnimationFrame(drawVuMeter);
+        }
+    </script>
+</body>
+</html>
